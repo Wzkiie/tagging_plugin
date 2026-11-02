@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -172,5 +173,49 @@ func TestRewriteMatchesApply(t *testing.T) {
 		if ch, _ := Rewrite(p, Edit{Album: "A", Date: "2024"}); ch {
 			t.Fatal("zweiter Lauf darf nichts ändern")
 		}
+	}
+}
+
+func TestReplaceAlbumAndNoDuplicates(t *testing.T) {
+	data := mkOpus(t, "r.opus", "1", "title=T", "artist=A", "album=Unknown Album")
+	out, ok, err := Apply(data, Edit{Album: "Echt", ReplaceAlbum: true})
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	pages, _ := parsePages(out)
+	pkt, _, _ := headerPages(pages)
+	tg, _ := parseTags(pkt)
+	n := 0
+	for _, c := range tg.comments {
+		if len(c) > 6 && strings.EqualFold(c[:6], "ALBUM=") {
+			n++
+		}
+	}
+	if n != 1 || tg.get("ALBUM") != "Echt" {
+		t.Errorf("ALBUM-Einträge: %d, Wert %q", n, tg.get("ALBUM"))
+	}
+	// Whitespace-Album gilt als leer
+	d2 := mkOpus(t, "w.opus", "1", "title=T", "album=   ")
+	if o2, ok, _ := Apply(d2, Edit{Album: "Neu"}); !ok {
+		t.Error("Whitespace-Album wurde nicht ersetzt")
+	} else if info, _ := Inspect(o2); info.Album != "Neu" {
+		t.Errorf("Album %q", info.Album)
+	}
+}
+
+func TestRewriteRefusesCorruptCRC(t *testing.T) {
+	data := mkOpus(t, "c.opus", "3")
+	data[len(data)/2] ^= 0xff // Bitfehler in einer Audioseite
+	p := filepath.Join(t.TempDir(), "c.opus")
+	os.WriteFile(p, data, 0o644)
+	cover := cover(t)
+	if ok, err := Rewrite(p, Edit{Album: strings.Repeat("x", 70000), Cover: cover}); err == nil || ok { // zwei Header-Seiten: alle Audioseiten werden umnummeriert
+		t.Fatalf("erwartet CRC-Fehler, got %v %v", ok, err)
+	}
+	if b, _ := os.ReadFile(p); !bytes.Equal(b, data) {
+		t.Error("Datei verändert")
+	}
+	if _, err := os.Stat(p + ".albumfix-tmp"); err == nil {
+		t.Error("tmp übrig")
 	}
 }

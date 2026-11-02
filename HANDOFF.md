@@ -23,17 +23,37 @@ Nutzer: Jacob (Deutsch, direkt, knapp, verifiziert, produktionsreif). Navidrome 
 - Harte 30 s pro Plugin-Aufruf (nicht konfigurierbar) → immer in Häppchen arbeiten.
 - Zeitplan täglich: `SchedulerScheduleRecurring` (Cron). HTTP nur für in `requiredHosts` deklarierte Hosts.
 
+## Stand v0.2 (umgesetzt und im echten Navidrome 0.64.2 getestet)
+- Deezer-Lookup (`deezer.go`, `internal/match`): zwei Suchen, Score = min(Titel, Artist) gegen den VOLLEN Deezer-Titel (nicht `title_short`:
+  der verschluckt "(Remix)"), feat.-Zusätze werden ignoriert, Laufzeit-Toleranz, Albumwahl: Künstleralbum vor Sampler, album > ep > single > compilation, früheste Veröffentlichung, kürzester Titel.
+- MP3 (`internal/id3`: ID3v2.3/2.4, TALB/TYER|TDRC/APIC). Nicht unterstützt: ID3v2.2, Unsynchronisation, Footer.
+- Config per `config.schema` im Manifest (ohne Schema: "plugin has no configurable options"), Cron, Pfadfilter, Dry-Run (Standard AN), KVStore-Zustand + Cursor.
+- Test-Setup: `nd-test/` (Navidrome-Binary, `nd.sh`, `reload.sh`, Testmusik aus ffmpeg mit echten Tags/Laufzeiten). `go test ./...` inkl. gemocktem Host-Integrationstest.
+- Gefundene und behobene Plattform-Fallen: (1) `time.Since` nutzt die Monotonic-Uhr, die im WASM nicht mit echter Zeit läuft -> `time.Now().Round(0)` + `Sub`;
+  (2) WASI hat kein chmod: neue Dateien bekämen 0600 + neuen Inode -> `internal/fsutil` kopiert in die vorhandene Datei; (3) neu eingespieltes .ndp deaktiviert das Plugin.
+- Nachweis (Testinstanz, 16 Dateien): 12 ergänzt, 4 korrekt abgelehnt (nicht gefunden, falsche Laufzeit, kein Titel-Tag, Remix statt Original), Audio-MD5 identisch,
+  Rechte/Inode erhalten, Navidrome-Watcher liest Album/Jahr/Cover automatisch ein, 2. Lauf = 0 Lookups, Fortsetzung in Häppchen (Budget 2,5 s) und Cron funktionieren.
+
+## Härtung nach Subagenten-Review (Dateien + Erkennung)
+- Ersetzen unter WASI (`internal/fsutil`): Write-Ahead. Neue Datei -> `.albumfix-tmp` (unvollständig) -> Sync -> atomar `.albumfix-ready` -> in die Originaldatei kopieren (kein O_TRUNC, danach Truncate+Sync). Bleibt `.ready` liegen (Abbruch), vollendet `fsutil.Recover` es beim nächsten Lauf; unvollständige `.tmp` werden verworfen.
+- "Unknown Album"/Whitespace/leeres Album wird ersetzt (`ReplaceAlbum`), keine doppelten ALBUM/TALB. `changed=false` wird nicht mehr als "done" gespeichert.
+- ID3: Datei mit unklarer Frame-Struktur wird NICHT angefasst (statt Frames abzuschneiden); Back Cover zählt nicht als Cover; erweiterter Header/Padding werden entfernt; MP3-Dauer bei VBR ohne Xing = unbekannt (0).
+- Opus: alte CRC wird vor dem Neuberechnen geprüft (beschädigte Datei bleibt unverändert), verkettete Ogg-Ströme werden nicht umnummeriert, Kommentar-Paket auf 32 MB begrenzt.
+- Erkennung: tote Query `artist:"X" track:"Y"` entfernt; Kette: `Artist Titel`, `Hauptartist Titel ohne Klammern`, `track:"Titel"` (limit 25). Versionswächter (live/remix/acoustic/karaoke/demo/part): Merkmale müssen in Tag und Deezer-Titel gleich sein. Titel-Vergleich auch gegen `title_short` und ohne Klammerzusatz. Albumwahl nur unter Treffern mit exakt passendem Artist; Sampler ("Verschiedene Interpreten") werden abgelehnt; Best-of/Live/Soundtrack und Deluxe/Remaster rangieren hinten; Jahr = frühestes Datum der Künstleralben. Tag-Bereinigung: "(Official Video)", "[Lyrics]", "Artist - Titel", " - Topic". Norm entfernt Apostroph/!/* und kombinierende Zeichen (P!nk, NFD-Umlaute).
+- Live-Nachweis (Dry-Run in Navidrome, echte Deezer-API): Johnny Cash "Hurt" -> American IV (nicht das Tribut-Album), Metallica -> Metallica (Remastered 2021) statt Live, Pink "So What" -> Funhouse, Dua Lipa "Don't Start Now" gefunden, Sunflower (nur Soundtrack-Sampler) abgelehnt.
+
+## Ablauf-Härtung (3. Review)
+- Zustand: Nur abgelehnte Dateien stehen im KVStore (mit Ablaufzeit = `retry_days`, `maxSize` 4MB im Manifest); fertige Dateien erkennt man an den Tags (Opus: Laufzeit wird nur bei Bedarf gelesen). Set-Fehler werden geloggt.
+- Fortschritt: Sperre und Cursor werden sofort/alle 5 s gesichert, Wächter-Aufruf nach 45 s, Fortsetzung nach Neustart (OnInit), Datei, bei der ein Aufruf abstirbt (`Current`), wird für retry_days ausgelassen. Cursor-Vergleich in Walk-Ordnung (`ord`).
+- Schreibtest je Bibliothek vor der Arbeit (klare Meldung statt "Not implemented on wasip1"), Abbruch nach 3 Schreibfehlern, nach 5 Netzwerkfehlern (300 s Pause), Rate-Limit-Pause; HTTP-Timeout ans Restbudget gekoppelt; ungültiger Cron fällt auf Standard zurück; Konfig-Werte werden begrenzt.
+- Cover nur, wenn das Album im Tag zum Deezer-Album passt (sonst "Album weicht ab").
+- Nachweis in Navidrome: Fortsetzung in Häppchen, `kill -9` mitten im Durchgang -> Neustart setzt am Cursor fort, Lauf ohne Schreibzugriff -> 0 Lookups + Hinweis.
+
 ## Offen
-1. Deezer-Lookup im Plugin (HTTP-Permission, Hosts `api.deezer.com` + Cover-CDN `*.dzcdn.net`/`e-cdns-images.dzcdn.net`).
-   Logik aus Python-Tagger übernehmen: zwei Suchanfragen, Score = min(Titel-, Artist-Ähnlichkeit),
-   Dauer-Toleranz (8 s), Album über record_type bevorzugen (album > ep > single > compilation), Rate ~50/5 s.
-   Referenz: `deezer_tagcheck.py` (liegt beim Nutzer; Optionen --min-score --dur-tol).
-2. MP3 (ID3v2, APIC) – bisher nur Opus. Optional m4a/flac.
-3. Plugin-Config (Mindest-Score, Dauer-Toleranz, Limit pro Lauf, Dry-Run), täglicher Zeitplan, Bereich einschränken
-   (z. B. nur Pfade unter `explo/`).
-4. Zustand merken (KVStore/Cache): bereits erfolglos geprüfte Dateien nicht jeden Tag neu abfragen (retry-days).
-5. Backup/Undo-Konzept (Original-Tags vorher sichern), Dry-Run-Report.
-6. Test auf dem NAS: zweite Navidrome-Instanz mit ~20–30 kopierten Explo-Dateien (Deezer ist in der Cloud-Sandbox gesperrt).
+1. Lauf auf dem NAS mit echten Explo-Dateien (andere Tags/Dateistruktur als die ffmpeg-Testdateien), erst `dry_run=true`.
+2. Undo: nur Logzeilen ("ergänzt: ..."); Backup von DB und Musik vorher ist Pflicht. Ideen aus dem Review: Journal `.albumfix/journal.jsonl`, `max_writes_per_day`, Plausibilitätsregeln (Jahr), Abbruch bei auffälliger Trefferquote.
+2b. Playlist-Filter: Abgleich ist linear (ca. 5 ms/Datei bei 1000 Titeln) - bei großen Listen vorab normalisieren/indexieren. Ablehnungsgrund-Statistik im Log fehlt noch. Mindestabstand zwischen Deezer-Anfragen (Limit ca. 50/5 s) nicht umgesetzt.
+3. Nicht getestet: sehr große Bibliotheken (>10k Dateien) im Plugin; m4a/flac nicht umgesetzt.
 
 ## Nicht tun
 - Kein Torrenting, keine Deezer-ARL verwenden. Nur öffentliche Deezer-API.

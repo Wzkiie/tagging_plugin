@@ -1,15 +1,119 @@
 {
   "name": "Album Fix",
   "author": "Jacob",
-  "version": "0.1.0",
-  "description": "Machbarkeitstest: ergänzt fehlende Album-, Jahr- und Cover-Tags in Opus-Dateien",
+  "version": "0.2.0",
+  "description": "Ergänzt fehlende Album-, Jahr- und Cover-Tags in Opus- und MP3-Dateien über die öffentliche Deezer-API",
   "permissions": {
     "library": {
-      "reason": "Opus-Dateien der Bibliothek lesen und fehlende Tags schreiben",
+      "reason": "Audiodateien der Bibliothek lesen und fehlende Tags schreiben",
       "filesystem": true
     },
     "scheduler": {
-      "reason": "Den Lauf kurz nach dem Start des Plugins auslösen"
+      "reason": "Täglicher Lauf und Fortsetzung in Häppchen (30-s-Limit pro Aufruf)"
+    },
+    "http": {
+      "reason": "Deezer-Suche und Cover-Download",
+      "requiredHosts": [
+        "api.deezer.com",
+        "*.dzcdn.net"
+      ]
+    },
+    "kvstore": {
+      "reason": "Merkt sich fertige und abgelehnte Dateien und den Fortschritt des Laufs",
+      "maxSize": "4MB"
+    },
+    "subsonicapi": {
+      "reason": "Wiedergabelisten lesen, um nur deren Titel zu bearbeiten"
+    },
+    "users": {
+      "reason": "Für den Zugriff auf die Wiedergabelisten eines Benutzers über die Subsonic-API"
+    }
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "dry_run": {
+          "type": "string",
+          "title": "Probelauf",
+          "description": "true = nur ins Log schreiben, nichts ändern; false = Tags wirklich schreiben",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "default": "true"
+        },
+        "min_score": {
+          "type": "string",
+          "title": "Mindest-Score",
+          "description": "Ähnlichkeit von Titel und Artist (0-1)",
+          "default": "0.85"
+        },
+        "dur_tol": {
+          "type": "string",
+          "title": "Laufzeit-Toleranz (s)",
+          "description": "Erlaubte Abweichung der Laufzeit in Sekunden",
+          "default": "8"
+        },
+        "path_filter": {
+          "type": "string",
+          "title": "Pfadfilter",
+          "description": "Nur Pfade mit diesem Teilstring, kommagetrennt (z. B. explo/). Leer = alles",
+          "default": ""
+        },
+        "limit_per_run": {
+          "type": "string",
+          "title": "Limit pro Durchgang",
+          "description": "Maximale Anzahl Lookups pro Durchgang, 0 = unbegrenzt",
+          "default": "0"
+        },
+        "retry_days": {
+          "type": "string",
+          "title": "Wiederholung (Tage)",
+          "description": "Abgelehnte Dateien erst nach X Tagen erneut prüfen",
+          "default": "7"
+        },
+        "min_age_min": {
+          "type": "string",
+          "title": "Mindestalter (min)",
+          "description": "Dateien jünger als X Minuten überspringen",
+          "default": "10"
+        },
+        "cron": {
+          "type": "string",
+          "title": "Zeitplan (Cron)",
+          "description": "Wann der tägliche Durchgang startet",
+          "default": "30 4 * * *"
+        },
+        "run_on_start": {
+          "type": "string",
+          "title": "Lauf beim Start",
+          "description": "Kurz nach dem Laden des Plugins einen Durchgang starten",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "default": "true"
+        },
+        "budget_ms": {
+          "type": "string",
+          "title": "Zeitbudget (ms)",
+          "description": "Arbeitszeit pro Aufruf, max. 24000 (Navidrome-Limit 30 s)",
+          "default": "18000"
+        },
+        "playlists": {
+          "type": "string",
+          "title": "Wiedergabelisten",
+          "description": "Nur Titel aus diesen Wiedergabelisten bearbeiten (Namen, kommagetrennt). Leer = keine Einschränkung",
+          "default": ""
+        },
+        "playlist_user": {
+          "type": "string",
+          "title": "Benutzer der Wiedergabelisten",
+          "description": "Navidrome-Benutzername, dem die Wiedergabelisten gehören (nötig, wenn Wiedergabelisten gesetzt sind)",
+          "default": ""
+        }
+      }
     }
   }
 }

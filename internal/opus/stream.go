@@ -1,15 +1,20 @@
 package opus
 
 import (
+	"albumfix/internal/fsutil"
 	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 )
 
 // readRawPage liest genau eine Ogg-Seite (Header + Segmenttabelle + Payload) als Rohbytes.
+// maxHeader begrenzt das Kommentar-Paket (ein korrupter Header ohne Ende würde sonst die ganze Datei einlesen).
+const maxHeader = 32 << 20
+
 func readRawPage(r *bufio.Reader) ([]byte, error) {
 	var hdr [27]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
@@ -82,6 +87,9 @@ func Rewrite(path string, e Edit) (bool, error) {
 		}
 		p := pageOf(raw)
 		packet = append(packet, p.payload...)
+		if len(packet) > maxHeader {
+			return false, errLayout
+		}
 		seqHdr++
 		for j, s := range p.segs {
 			if s < 255 {
@@ -103,8 +111,11 @@ func Rewrite(path string, e Edit) (bool, error) {
 	newPkt := t.bytes()
 	hdrPages := buildHeaderPages(p0.serial, newPkt)
 
-	tmp := path + ".albumfix-tmp"
-	out, err := os.Create(tmp)
+	if err := fsutil.CheckWritable(path); err != nil {
+		return false, err
+	}
+	tmp := path + fsutil.TmpSuffix
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return false, err
 	}
@@ -122,6 +133,7 @@ func Rewrite(path string, e Edit) (bool, error) {
 			return fail(err)
 		}
 	}
+	// Seitennummern nur im ersten Strom anpassen (bei verketteten Ogg-Dateien bleiben die übrigen Ströme unberührt)
 	seq := uint32(1 + len(hdrPages))
 	for {
 		raw, err := readRawPage(br)
@@ -131,12 +143,20 @@ func Rewrite(path string, e Edit) (bool, error) {
 		if err != nil {
 			return fail(err)
 		}
-		if binary.LittleEndian.Uint32(raw[18:]) != seq {
-			binary.LittleEndian.PutUint32(raw[18:], seq)
-			copy(raw[22:26], []byte{0, 0, 0, 0})
-			binary.LittleEndian.PutUint32(raw[22:], oggCRC(raw))
+		if binary.LittleEndian.Uint32(raw[14:]) == p0.serial {
+			if binary.LittleEndian.Uint32(raw[18:]) != seq {
+				// die alte Prüfsumme vorher prüfen, sonst würde der Neuberechnen einen Bitfehler "heilen"
+				stored := binary.LittleEndian.Uint32(raw[22:])
+				copy(raw[22:26], []byte{0, 0, 0, 0})
+				if oggCRC(raw) != stored {
+					return fail(fmt.Errorf("CRC-Fehler in Audioseite %d: Datei ist beschädigt, bleibt unverändert", seq))
+				}
+				binary.LittleEndian.PutUint32(raw[18:], seq)
+				binary.LittleEndian.PutUint32(raw[22:], 0)
+				binary.LittleEndian.PutUint32(raw[22:], oggCRC(raw))
+			}
+			seq++
 		}
-		seq++
 		if _, err := bw.Write(raw); err != nil {
 			return fail(err)
 		}
@@ -148,8 +168,7 @@ func Rewrite(path string, e Edit) (bool, error) {
 		os.Remove(tmp)
 		return false, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+	if err := fsutil.Replace(tmp, path); err != nil {
 		return false, err
 	}
 	return true, nil

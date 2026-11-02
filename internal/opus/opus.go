@@ -23,6 +23,9 @@ type Edit struct {
 	Album string // wird nur gesetzt, wenn noch kein ALBUM-Tag existiert
 	Date  string // wird nur gesetzt, wenn noch kein DATE-Tag existiert
 	Cover []byte // JPEG/PNG; wird nur eingebettet, wenn noch kein Cover existiert
+
+	// ReplaceAlbum: ein vorhandenes (Platzhalter-)Album wie "Unknown Album" ersetzen statt nur leere zu füllen.
+	ReplaceAlbum bool
 }
 
 // Info zeigt den aktuellen Zustand einer Datei.
@@ -175,7 +178,18 @@ func (t *tags) get(key string) string {
 	return ""
 }
 
-func (t *tags) has(key string) bool { return t.get(key) != "" }
+func (t *tags) has(key string) bool { return strings.TrimSpace(t.get(key)) != "" }
+
+// set entfernt alle vorhandenen Einträge mit diesem Schlüssel (auch leere) und hängt genau einen neuen an.
+func (t *tags) set(key, val string) {
+	out := make([]string, 0, len(t.comments)+1)
+	for _, c := range t.comments {
+		if k, _, ok := strings.Cut(c, "="); !(ok && strings.EqualFold(k, key)) {
+			out = append(out, c)
+		}
+	}
+	t.comments = append(out, key+"="+val)
+}
 
 func pictureBlock(img []byte) (string, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(img))
@@ -276,12 +290,12 @@ func Apply(data []byte, e Edit) ([]byte, bool, error) {
 // addMissing ergänzt nur fehlende Felder; true, wenn etwas geändert wurde.
 func addMissing(t *tags, e Edit) bool {
 	changed := false
-	if e.Album != "" && !t.has("ALBUM") {
-		t.comments = append(t.comments, "ALBUM="+e.Album)
+	if e.Album != "" && (e.ReplaceAlbum || !t.has("ALBUM")) {
+		t.set("ALBUM", e.Album)
 		changed = true
 	}
 	if e.Date != "" && !t.has("DATE") {
-		t.comments = append(t.comments, "DATE="+e.Date)
+		t.set("DATE", e.Date)
 		changed = true
 	}
 	if len(e.Cover) > 0 && !t.has("METADATA_BLOCK_PICTURE") {
