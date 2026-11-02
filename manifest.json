@@ -1,0 +1,15 @@
+{
+  "name": "Album Fix",
+  "author": "Jacob",
+  "version": "0.1.0",
+  "description": "Machbarkeitstest: ergänzt fehlende Album-, Jahr- und Cover-Tags in Opus-Dateien",
+  "permissions": {
+    "library": {
+      "reason": "Opus-Dateien der Bibliothek lesen und fehlende Tags schreiben",
+      "filesystem": true
+    },
+    "scheduler": {
+      "reason": "Den Lauf kurz nach dem Start des Plugins auslösen"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# Deezer-Tagger: taggt neue Explo-Songs dauerhaft (Album, Jahr, Cover).
+# Läuft einmal täglich um 04:30 (--at unten ändern, Zeitzone steht bei TZ) und
+# zusätzlich einmal direkt beim Start des Containers.
+# In Portainer: Stacks -> Add stack -> Web editor -> diesen Inhalt einfügen.
+# Es wird KEIN eigenes Image gebaut: das Skript wird als Datei eingehängt.
+#
+# VORBEREITUNG (einmalig, auf dem NAS):
+#   1. Ordner anlegen:  .../tagger/app   .../tagger/state   .../tagger/backup
+#   2. deezer_tagcheck.py nach  .../tagger/app  kopieren
+#   3. Unten die vier Pfade ersetzen (siehe Kommentare).
+services:
+  deezer-tagger:
+    image: python:3.12-slim
+    container_name: deezer-tagger
+    restart: unless-stopped
+    # Gleiche Benutzer-/Gruppen-ID wie Navidrome (dort PUID=1000, PGID=10),
+    # damit der Container die Dateien schreiben darf.
+    user: "1000:10"
+    stop_grace_period: 60s   # lässt eine laufende Datei sauber fertig schreiben
+    working_dir: /app
+    environment:
+      - HOME=/tmp
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/state/pylib
+      - TZ=Europe/Berlin
+    volumes:
+      # 1) Der Explo-Ordner auf dem NAS (Windows: Y:\Musik\explo). Linke Seite anpassen!
+      - /volume1/DEIN/PFAD/Musik/explo:/music/explo
+      # 2) Ordner mit deezer_tagcheck.py (nur lesen)
+      - /volume1/DEIN/PFAD/tagger/app:/app:ro
+      # 3) Zustand, Report und installierte Python-Pakete
+      - /volume1/DEIN/PFAD/tagger/state:/state
+      # 4) Sicherungskopien der Originaldateien vor jeder Änderung
+      - /volume1/DEIN/PFAD/tagger/backup:/backup
+    command: >
+      sh -c "[ -d /state/pylib/mutagen ] || pip install --no-cache-dir --target /state/pylib mutagen requests;
+      exec python -u deezer_tagcheck.py /music/explo
+      --watch --apply --limit 0
+      --at 04:30 --min-age 10
+      --dur-tol 8
+      --backup-dir /backup
+      --state-file /state/state.json
+      --report /state/report.csv"
