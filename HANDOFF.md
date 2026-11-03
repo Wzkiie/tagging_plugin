@@ -2,7 +2,7 @@
 
 Ziel: Navidrome-Plugin, das in Explo-Downloads (YouTube, viele ohne Album/Cover) fehlende Tags
 (Album, Jahr, Cover) per Deezer-Public-API ergänzt – direkt in den Audiodateien, täglich automatisch.
-Nutzer: Jacob (Deutsch, direkt, knapp, verifiziert, produktionsreif). Navidrome 0.64.2, Docker auf UGREEN NAS, Musik `/music`.
+Nutzer: deutschsprachig. Navidrome 0.64.2, Docker, Musik unter `/music`.
 
 ## Stand
 - `internal/opus`: Ogg-Opus-Tag-Rewriter (nur stdlib). `Apply` (in-memory, für Tests) und `Rewrite(path, Edit)`
@@ -48,6 +48,12 @@ Nutzer: Jacob (Deutsch, direkt, knapp, verifiziert, produktionsreif). Navidrome 
 - Schreibtest je Bibliothek vor der Arbeit (klare Meldung statt "Not implemented on wasip1"), Abbruch nach 3 Schreibfehlern, nach 5 Netzwerkfehlern (300 s Pause), Rate-Limit-Pause; HTTP-Timeout ans Restbudget gekoppelt; ungültiger Cron fällt auf Standard zurück; Konfig-Werte werden begrenzt.
 - Cover nur, wenn das Album im Tag zum Deezer-Album passt (sonst "Album weicht ab").
 - Nachweis in Navidrome: Fortsetzung in Häppchen, `kill -9` mitten im Durchgang -> Neustart setzt am Cursor fort, Lauf ohne Schreibzugriff -> 0 Lookups + Hinweis.
+
+## Test mit 1.948 echten Explo-Dateien (nd-real)
+- Testumgebung: `../nd-real/` (eigene Navidrome-Instanz, Port 4535). Master = lokale Musikordner (Kopie der echten Dateien) (wird NIE verändert), `./reset.sh '<plugin-config-json>'` baut Kopie (APFS-Klon) + Plugin + KV neu auf; Standard Dry-Run.
+- Befund: Explo = YouTube-Rips, Laufzeit weicht oft 10-40 s von Deezer ab (Intro/Outro), einige Dateien sind 30-s-Clips. Feste Toleranz 8 s lehnte 330 richtige Songs ab -> zweistufig: `dur_tol` 8 s immer, `dur_tol_max` 45 s nur bei Score >= 0.95. Log zeigt jetzt `Laufzeit-Δ`.
+- Ergebnis Dry-Run: 1738 von 1947 (89 %) ergänzt, 209 abgelehnt (116 Laufzeit, 25 Sampler, 25 Titel/Artist, 12 kein Treffer), 1 beschädigte Datei (`17_für_immer-Provinz.opus`, schon im Original kaputt) unangefasst.
+- Schreiblauf auf der Kopie: Audio bei allen 1948 Dateien byte-identisch (MD5), alle Original-Tags erhalten, Rechte gleich, 1738 Cover + 1576 Alben ergänzt, keine Reste, Navidrome liest alles ein (1528 Alben mit Cover).
 
 ## Offen
 1. Lauf auf dem NAS mit echten Explo-Dateien (andere Tags/Dateistruktur als die ffmpeg-Testdateien), erst `dry_run=true`.

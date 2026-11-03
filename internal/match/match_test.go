@@ -32,11 +32,11 @@ func TestEvaluate(t *testing.T) {
 		return tr
 	}
 	tracks := []Track{mk("Song", "Band", 200), mk("Song", "Band", 260), mk("Other", "Band", 200)}
-	ok, best := Evaluate("Band feat. X", "Song", 201, tracks, 0.85, 8)
+	ok, best := Evaluate("Band feat. X", "Song", 201, tracks, 0.85, 8, 0)
 	if len(ok) != 1 || ok[0].Track.Duration != 200 || best == nil {
 		t.Fatalf("unerwartet: %+v", ok)
 	}
-	if ok, _ := Evaluate("Band", "Song", 0, tracks, 0.85, 8); len(ok) != 2 {
+	if ok, _ := Evaluate("Band", "Song", 0, tracks, 0.85, 8, 0); len(ok) != 2 {
 		t.Errorf("ohne Laufzeit sollten 2 Treffer passen, got %d", len(ok))
 	}
 }
@@ -178,5 +178,24 @@ func TestQueriesNoDeadStrictQuery(t *testing.T) {
 	}
 	if last := qs[len(qs)-1]; !strings.HasPrefix(last.Q, `track:"`) || last.Limit != 25 {
 		t.Errorf("letzte Query: %+v", last)
+	}
+}
+
+func TestDurationTiers(t *testing.T) {
+	tr := trk("Song", "Song", "Band", 180)
+	for _, c := range []struct {
+		length float64
+		max    float64
+		want   int
+	}{{185, 0, 1}, {200, 0, 0}, {200, 45, 1}, {240, 45, 0}, {30, 45, 0}} {
+		ok, _ := Evaluate("Band", "Song", c.length, []Track{tr}, 0.85, 8, c.max)
+		if len(ok) != c.want {
+			t.Errorf("Laufzeit %v (max %v): %d Treffer, erwartet %d", c.length, c.max, len(ok), c.want)
+		}
+	}
+	// ungenauer Titel (Score < 0.95) bekommt die große Toleranz nicht
+	loose := trk("Song Name Two", "Song Name Two", "Band", 180)
+	if ok, _ := Evaluate("Band", "Song Name", 200, []Track{loose}, 0.7, 8, 45); len(ok) != 0 {
+		t.Error("große Toleranz nur bei Score >= 0.95")
 	}
 }

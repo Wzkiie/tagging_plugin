@@ -13,6 +13,7 @@ type settings struct {
 	DryRun       bool     // nur protokollieren, nichts schreiben (Standard: an)
 	MinScore     float64  // Mindest-Ähnlichkeit Titel/Artist
 	DurTol       float64  // erlaubte Laufzeit-Abweichung in Sekunden
+	DurTolMax    float64  // größere Abweichung, nur bei praktisch exaktem Titel/Artist (YouTube-Rips), 0 = aus
 	Limit        int      // max. Änderungen/Lookups pro Lauf (0 = unbegrenzt)
 	Playlists    []string // nur Titel aus Wiedergabelisten mit diesen Namen (leer = keine Einschränkung)
 	PlaylistUser string   // Navidrome-Benutzer, dessen Wiedergabelisten gelesen werden
@@ -52,6 +53,7 @@ func loadSettings() settings {
 		DryRun:     cfgBool("dry_run", true),
 		MinScore:   cfgFloat("min_score", 0.85),
 		DurTol:     cfgFloat("dur_tol", 8),
+		DurTolMax:  cfgFloat("dur_tol_max", 45),
 		Limit:      int(cfgFloat("limit_per_run", 0)),
 		RetryDays:  cfgFloat("retry_days", 7),
 		MinAgeMin:  cfgFloat("min_age_min", 10),
@@ -82,6 +84,7 @@ func loadSettings() settings {
 	// Unsinnige Werte auf sinnvolle Grenzen ziehen
 	s.MinScore = min(max(s.MinScore, 0.5), 1)
 	s.DurTol = max(s.DurTol, 0)
+	s.DurTolMax = min(max(s.DurTolMax, 0), 120)
 	s.Limit = max(s.Limit, 0)
 	s.RetryDays = max(s.RetryDays, 0)
 	s.MinAgeMin = max(s.MinAgeMin, 0)

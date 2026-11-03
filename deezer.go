@@ -95,7 +95,7 @@ func (d *deezerClient) album(id int64) (match.Album, error) {
 }
 
 // lookup sucht ein Album für Artist/Titel. Liefert (Album, Score, Grund); Album == nil heißt abgelehnt.
-func (d *deezerClient) lookup(artist, title string, length float64, s settings) (*match.Album, float64, string, error) {
+func (d *deezerClient) lookup(artist, title string, length float64, s settings) (*match.Album, float64, float64, string, error) {
 	var ok []match.Candidate
 	var best *match.Candidate
 	for _, q := range match.Queries(artist, title) {
@@ -103,10 +103,10 @@ func (d *deezerClient) lookup(artist, title string, length float64, s settings) 
 			Data []match.Track `json:"data"`
 		}
 		if err := deezerGet("/search", url.Values{"q": {q.Q}, "limit": {strconv.Itoa(q.Limit)}}, &res); err != nil {
-			return nil, 0, "", err
+			return nil, 0, 0, "", err
 		}
 		var b *match.Candidate
-		ok, b = match.Evaluate(artist, title, length, res.Data, s.MinScore, s.DurTol)
+		ok, b = match.Evaluate(artist, title, length, res.Data, s.MinScore, s.DurTol, s.DurTolMax)
 		if best == nil || (b != nil && b.Score > best.Score) {
 			best = b
 		}
@@ -117,11 +117,11 @@ func (d *deezerClient) lookup(artist, title string, length float64, s settings) 
 	if len(ok) == 0 {
 		switch {
 		case best == nil:
-			return nil, 0, "kein Treffer", nil
+			return nil, 0, 0, "kein Treffer", nil
 		case best.Score < s.MinScore:
-			return nil, best.Score, "Titel/Artist zu unähnlich", nil
+			return nil, best.Score, 0, "Titel/Artist zu unähnlich", nil
 		}
-		return nil, best.Score, fmt.Sprintf("Laufzeit weicht %.0fs ab", best.DurDiff), nil
+		return nil, best.Score, best.DurDiff, fmt.Sprintf("Laufzeit weicht %.0fs ab", best.DurDiff), nil
 	}
 
 	// nur Treffer mit exakt passendem Artist für die Albumwahl ("Johnny Cash", nicht "Johnny Crash")
@@ -146,7 +146,7 @@ func (d *deezerClient) lookup(artist, title string, length float64, s settings) 
 		a, err := d.album(c.Track.Album.ID)
 		if err != nil {
 			if errors.Is(err, errQuota) || errors.Is(err, errBudget) {
-				return nil, 0, "", err
+				return nil, 0, 0, "", err
 			}
 			a = c.Track.Album
 		}
@@ -160,7 +160,7 @@ func (d *deezerClient) lookup(artist, title string, length float64, s settings) 
 	}
 	pick := match.PickAlbum(albums, artist)
 	if match.IsSampler(pick, artist) {
-		return nil, ok[0].Score, "nur Sampler/fremdes Album gefunden", nil
+		return nil, ok[0].Score, ok[0].DurDiff, "nur Sampler/fremdes Album gefunden", nil
 	}
 	// Jahr: frühestes Datum unter den Alben des Künstlers (Neuauflagen tragen oft ein späteres Datum)
 	for _, a := range albums {
@@ -168,7 +168,7 @@ func (d *deezerClient) lookup(artist, title string, length float64, s settings) 
 			pick.ReleaseDate = a.ReleaseDate
 		}
 	}
-	return &pick, ok[0].Score, "ok", nil
+	return &pick, ok[0].Score, ok[0].DurDiff, "ok", nil
 }
 
 // cover lädt das Cover eines Albums (XL, sonst Big).

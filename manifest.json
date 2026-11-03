@@ -1,6 +1,6 @@
 {
   "name": "Album Fix",
-  "author": "Jacob",
+  "author": "Wzkiie",
   "version": "0.2.0",
   "description": "Ergänzt fehlende Album-, Jahr- und Cover-Tags in Opus- und MP3-Dateien über die öffentliche Deezer-API",
   "permissions": {
@@ -112,6 +112,12 @@
           "title": "Benutzer der Wiedergabelisten",
           "description": "Navidrome-Benutzername, dem die Wiedergabelisten gehören (nötig, wenn Wiedergabelisten gesetzt sind)",
           "default": ""
+        },
+        "dur_tol_max": {
+          "type": "string",
+          "title": "Laufzeit-Toleranz groß (s)",
+          "description": "Größere erlaubte Abweichung, gilt nur bei praktisch exaktem Titel und Künstler (YouTube-Dateien haben oft Intro/Outro). 0 = aus",
+          "default": "45"
         }
       }
     }

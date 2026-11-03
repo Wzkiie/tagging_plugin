@@ -17,6 +17,7 @@ type fileState struct {
 	Tried    int64   `json:"t"`           // Unix-Zeit des Versuchs
 	Reason   string  `json:"r,omitempty"` // Grund bei rej
 	Tol      float64 `json:"d,omitempty"`
+	TolMax   float64 `json:"x,omitempty"`
 	MinScore float64 `json:"c,omitempty"`
 	Dry      bool    `json:"y,omitempty"` // Eintrag stammt aus einem Probelauf
 }

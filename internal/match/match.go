@@ -243,10 +243,10 @@ func Score(artist, title string, t Track) float64 {
 	return min(tTitle, artistRatio(artist, t))
 }
 
-// Evaluate filtert Treffer nach Mindest-Score und Laufzeit (length == 0: Laufzeit unbekannt, wird nicht geprüft).
+// Evaluate filtert Treffer nach Mindest-Score und Laufzeit (length == 0: Laufzeit unbekannt, wird nicht geprüft; durTolMax 0 = aus).
 // Sortierung: Score, dann Treffer ohne Versionszusatz, dann kleinste Laufzeitabweichung.
 // best ist der beste Treffer auch bei Ablehnung (für den Grund).
-func Evaluate(artist, title string, length float64, tracks []Track, minScore, durTol float64) (ok []Candidate, best *Candidate) {
+func Evaluate(artist, title string, length float64, tracks []Track, minScore, durTol, durTolMax float64) (ok []Candidate, best *Candidate) {
 	for _, t := range tracks {
 		c := Candidate{Track: t, Score: Score(artist, title, t)}
 		if length > 0 {
@@ -260,7 +260,10 @@ func Evaluate(artist, title string, length float64, tracks []Track, minScore, du
 			cc := c
 			best = &cc
 		}
-		if c.Score >= minScore && (length == 0 || c.DurDiff <= durTol) {
+		// Laufzeit: bis durTol immer ok. Explo-Dateien sind YouTube-Rips (Intro/Outro, Clips): bis durTolMax nur bei
+		// praktisch exaktem Titel/Artist (Score >= 0.95).
+		if c.Score >= minScore && (length == 0 || c.DurDiff <= durTol ||
+			(durTolMax > durTol && c.Score >= max(minScore, 0.95) && c.DurDiff <= durTolMax)) {
 			ok = append(ok, c)
 		}
 	}

@@ -116,11 +116,11 @@ func (p *albumfix) OnCallback(req scheduler.SchedulerCallbackRequest) error {
 			return nil
 		}
 		run = runState{Active: true}
-		logf(pdk.LogInfo, "Durchgang startet - %s, min_score=%.2f, dur_tol=%.0fs, retry=%.0fd, limit=%d, Filter=%v",
-			modeText(s), s.MinScore, s.DurTol, s.RetryDays, s.Limit, s.PathFilter)
+		logf(pdk.LogInfo, "Durchgang startet - %s, min_score=%.2f, dur_tol=%.0fs (bis %.0fs bei exaktem Treffer), retry=%.0fd, limit=%d, Filter=%v",
+			modeText(s), s.MinScore, s.DurTol, s.DurTolMax, s.RetryDays, s.Limit, s.PathFilter)
 	} else if run.Current != "" {
 		// Das letzte Häppchen ist bei dieser Datei abgestorben (30-s-Limit/Neustart): nicht in einer Schleife wiederholen
-		saveFileState(run.CurrentKey, fileState{Status: "rej", Reason: "Abbruch/Zeitüberschreitung bei dieser Datei", Tol: s.DurTol, MinScore: s.MinScore, Dry: s.DryRun}, retryTTL(s))
+		saveFileState(run.CurrentKey, fileState{Status: "rej", Reason: "Abbruch/Zeitüberschreitung bei dieser Datei", Tol: s.DurTol, TolMax: s.DurTolMax, MinScore: s.MinScore, Dry: s.DryRun}, retryTTL(s))
 		logf(pdk.LogWarn, "%s: Aufruf ist hier abgebrochen - Datei wird für %.0f Tage ausgelassen", run.Current, s.RetryDays)
 		run.Current, run.CurrentKey = "", ""
 	}
@@ -352,7 +352,7 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 	now := time.Now().Unix()
 	if prev, ok := loadFileState(key); ok && prev.MTime == mt {
 		switch {
-		case prev.Status == "rej" && prev.Dry == s.DryRun && prev.Tol == s.DurTol && prev.MinScore == s.MinScore &&
+		case prev.Status == "rej" && prev.Dry == s.DryRun && prev.Tol == s.DurTol && prev.TolMax == s.DurTolMax && prev.MinScore == s.MinScore &&
 			float64(now-prev.Tried) < s.RetryDays*86400:
 			st.skipped++
 			return nil
@@ -382,7 +382,7 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 	reject := func(reason string) {
 		st.rejected++
 		logf(pdk.LogInfo, "abgelehnt: %s (%s)", rel, reason)
-		saveFileState(key, fileState{Status: "rej", MTime: mt, Reason: reason, Tol: s.DurTol, MinScore: s.MinScore, Dry: s.DryRun}, retryTTL(s))
+		saveFileState(key, fileState{Status: "rej", MTime: mt, Reason: reason, Tol: s.DurTol, TolMax: s.DurTolMax, MinScore: s.MinScore, Dry: s.DryRun}, retryTTL(s))
 	}
 	if m.Title == "" || m.Artist == "" {
 		reject("Titel/Artist-Tag fehlt")
@@ -396,7 +396,7 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 		onLookup(key, rel)
 	}
 	st.looked++
-	album, score, reason, err := dz.lookup(match.CleanArtist(m.Artist), match.CleanTitle(m.Artist, m.Title), m.Duration, s)
+	album, score, durDiff, reason, err := dz.lookup(match.CleanArtist(m.Artist), match.CleanTitle(m.Artist, m.Title), m.Duration, s)
 	if err != nil {
 		if errors.Is(err, errBudget) || errors.Is(err, errQuota) {
 			st.looked--
@@ -449,13 +449,13 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 			}
 		}
 	}
-	desc := fmt.Sprintf("%s | %s - %s -> Album=%q Jahr=%q Cover=%s (Score %.2f, %s)",
-		rel, m.Artist, m.Title, edit.album, edit.date, coverNote, score, album.RecordType)
+	desc := fmt.Sprintf("%s | %s - %s -> Album=%q Jahr=%q Cover=%s (Score %.2f, %s, Laufzeit-Δ %.0fs)",
+		rel, m.Artist, m.Title, edit.album, edit.date, coverNote, score, album.RecordType, durDiff)
 
 	if s.DryRun {
 		logf(pdk.LogInfo, "PROBELAUF, würde ergänzen: %s", desc)
 		st.changed++
-		saveFileState(key, fileState{Status: "rej", MTime: mt, Reason: "Probelauf", Tol: s.DurTol, MinScore: s.MinScore, Dry: true}, retryTTL(s))
+		saveFileState(key, fileState{Status: "rej", MTime: mt, Reason: "Probelauf", Tol: s.DurTol, TolMax: s.DurTolMax, MinScore: s.MinScore, Dry: true}, retryTTL(s))
 		return nil
 	}
 
@@ -482,7 +482,7 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 		// nichts geschrieben (z. B. unbekannter Aufbau): nicht als erledigt merken, aber auch nicht jeden Lauf neu abfragen
 		st.failed++
 		logf(pdk.LogWarn, "%s: nichts geschrieben, obwohl Treffer vorhanden", rel)
-		saveFileState(key, fileState{Status: "rej", MTime: mtimeOf(path), Reason: "nichts geschrieben", Tol: s.DurTol, MinScore: s.MinScore}, retryTTL(s))
+		saveFileState(key, fileState{Status: "rej", MTime: mtimeOf(path), Reason: "nichts geschrieben", Tol: s.DurTol, TolMax: s.DurTolMax, MinScore: s.MinScore}, retryTTL(s))
 		return nil
 	}
 	st.changed++
@@ -490,7 +490,7 @@ func processFile(path, kind, key, rel string, s settings, dz *deezerClient, st *
 	logf(pdk.LogInfo, "ergänzt: %s", desc)
 	if needCover && edit.cover == nil {
 		// Album steht, Cover fehlt noch: später erneut versuchen
-		saveFileState(key, fileState{Status: "rej", MTime: mtimeOf(path), Reason: "Cover-Download fehlgeschlagen", Tol: s.DurTol, MinScore: s.MinScore}, retryTTL(s))
+		saveFileState(key, fileState{Status: "rej", MTime: mtimeOf(path), Reason: "Cover-Download fehlgeschlagen", Tol: s.DurTol, TolMax: s.DurTolMax, MinScore: s.MinScore}, retryTTL(s))
 		return nil
 	}
 	return nil
